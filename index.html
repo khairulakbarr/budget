@@ -78,17 +78,60 @@ td{padding:11px 8px;border-bottom:1px solid var(--line);vertical-align:top}tr:la
 <div class="bg" id="bg"><div class="modal" id="modal"></div></div>
 
 <script>
+// --- URL GOOGLE APPS SCRIPT ---
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyY4li2i4mXTiFVn8MrD6U414nRydiVW-uRP1SV_355ynuh30GGnnZgt8xN41hYCerq/exec'; // Ganti dengan URL deployment Web App Anda
+
 const DAYS=['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'],MON=['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
 const KEY='catatan-keuangan-v1',PK='catatan-keuangan-pin';
 const uid=()=>Math.random().toString(36).slice(2,10);
 let S,view='saldo',F={m:'',c:''},OPEN={};
+
 function seed(){
   const p=[['Cash Home',10000000],['Cash Store',5000000],['Banking',5000000],['STR King',5000000]].map(x=>({id:uid(),name:x[0],init:x[1]}));
   return{pos:p.map(x=>({id:x.id,name:x.name})),topups:p.map(x=>({id:uid(),date:'2026-10-01',pos:x.id,amount:x.init,note:'Saldo awal'})),
    cats:['Setoran','Operasional','Belanja Stok','Gaji','Transport','Makan','Listrik & Air','Lain-lain'],
-   tx:[{id:uid(),date:'2026-10-16',cat:'Setoran',note:'Bg Sul',amount:9000000,alloc:{[p[0].id]:4000000,[p[1].id]:1500000,[p[2].id]:1500000,[p[3].id]:2000000}}]};}
-function load(){try{const r=localStorage.getItem(KEY);if(r)return JSON.parse(r)}catch(e){}return seed()}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+   tx:[{id:uid(),date:'2026-10-16',cat:'Setoran',note:'Bg Sul',amount:9000000,alloc:{[p[0].id]:4000000,[p[1].id]:1500000,[p[2].id]:1500000,[p[3].id]:2000000}}]};
+}
+
+// Fungsi load dan save yang disinkronkan dengan Apps Script & LocalStorage
+async function loadData() {
+  try {
+    if (SCRIPT_URL && !SCRIPT_URL.includes('PASTE_URL')) {
+      const res = await fetch(SCRIPT_URL);
+      const data = await res.json();
+      if (data && data.pos) {
+        S = data;
+        saveLocal();
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn('Gagal memuat dari Spreadsheet, menggunakan cache lokal.', e);
+  }
+  S = loadLocal();
+}
+
+function loadLocal() {
+  try { const r = localStorage.getItem(KEY); if (r) return JSON.parse(r); } catch (e) {}
+  return seed();
+}
+
+function saveLocal() {
+  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
+}
+
+function save() {
+  saveLocal(); // Simpan lokal sebagai backup instan
+  if (SCRIPT_URL && !SCRIPT_URL.includes('PASTE_URL')) {
+    fetch(SCRIPT_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(S)
+    }).catch(err => console.error('Gagal sinkronisasi ke Spreadsheet:', err));
+  }
+}
+
 const rp=n=>(n<0?'-':'')+'Rp '+Math.abs(n).toLocaleString('id-ID');
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const dp=s=>{const[y,m,d]=s.split('-').map(Number);return[y,m,d,new Date(y,m-1,d).getDay()]};
@@ -96,7 +139,7 @@ const fd=s=>{const[y,m,d,w]=dp(s);return DAYS[w]+', '+d+' '+MON[m-1]+' '+y};
 const fs=s=>{const[y,m,d,w]=dp(s);return DAYS[w].slice(0,3)+', '+d+' '+MON[m-1]+' '+y};
 const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 const pn=id=>(S.pos.find(p=>p.id===id)||{name:'(pos dihapus)'}).name;
-const num=v=>parseInt(String(v).replace(/\D/g,''))||0;
+const num=v=>parseInt(String(v).replace(/\D/g, ''))||0;
 const fmtIn=el=>{const n=num(el.value);el.value=n?n.toLocaleString('id-ID'):''};
 const cmp=(a,b)=>b.date.localeCompare(a.date);
 function bal(skip){const b={};S.pos.forEach(p=>b[p.id]=0);S.topups.forEach(t=>{if(t.pos in b)b[t.pos]+=t.amount});
@@ -153,14 +196,13 @@ function posCard(p,sal){
 function txTable(list,act=true){
   if(!list.length)return'<div class="empty">Belum ada transaksi.</div>';
   return`<div class="tw"><table><thead><tr><th>Tanggal</th><th>Kategori</th><th>Keterangan</th><th>Sumber dana</th><th class="r">Nominal</th>${act?'<th></th>':''}</tr></thead><tbody>${list.map(t=>`<tr><td>${fd(t.date)}</td><td><span class="tag">${esc(t.cat)}</span></td><td>${esc(t.note)}</td>
-  <td>${Object.entries(t.alloc).filter(e=>e[1]>0).map(([k,v])=>`<span class="pill">${esc(pn(k))}: ${v.toLocaleString('id-ID')}</span>`).join('')}</td><td class="r"><b>${rp(t.amount)}</b></td>
-  ${act?`<td class="r" style="white-space:nowrap"><button class="btn s" onclick="txForm('${t.id}')">Edit</button> <button class="btn s d" onclick="delTx('${t.id}')">Hapus</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
+  <td>${Object.entries(t.alloc).filter(e=>e[1]>0).map(([k,v])=>`<span class="pill">${esc(pn(k))}: ${v.toLocaleString('id-ID')}</span>`).join('')}</td><td class="r"><b>${rp(t.amount)}</b></td>${act?`<td class="r" style="white-space:nowrap"><button class="btn s" onclick="txForm('${t.id}')">Edit</button> <button class="btn s d" onclick="delTx('${t.id}')">Hapus</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
 }
 function vTx(){
   const months=[...new Set(S.tx.map(t=>t.date.slice(0,7)))].sort().reverse();
   const l=S.tx.slice().sort(cmp).filter(t=>(!F.m||t.date.startsWith(F.m))&&(!F.c||t.cat===F.c)),tot=l.reduce((a,t)=>a+t.amount,0);
   return`<div class="card"><div class="row sp mb"><h2>Daftar transaksi</h2><button class="btn p" onclick="txForm()">+ Transaksi</button></div>
-  <div class="row mb"><div style="flex:1;min-width:140px"><select onchange="F.m=this.value;render()"><option value="">Semua bulan</option>${months.map(m=>`<option value="${m}" ${F.m===m?'selected':''}>${MON[+m.slice(5)-1]} ${m.slice(0,4)}</option>`).join('')}</select></div>
+  <div class="row mb"><div style="flex:1;min-width:140px"><select onchange="F.m=this.value;render()"><option value="">Semua bulan</option>${months.map(m=>`<option value="${m}" ${F.m===m?'selected':''}>${MON[+m.slice(5)-1]}${m.slice(0,4)}</option>`).join('')}</select></div>
   <div style="flex:1;min-width:140px"><select onchange="F.c=this.value;render()"><option value="">Semua kategori</option>${S.cats.map(c=>`<option ${F.c===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div>
   <div class="mut">Total tampil: <b>${rp(tot)}</b></div></div>${txTable(l)}</div>`;
 }
@@ -202,7 +244,7 @@ function txForm(id){
   <div class="w"><label>Keterangan</label><input id="t_n" value="${esc(t.note)}" placeholder="mis. Bg Sul"></div>
   <div class="w"><label>Nominal transaksi (Rp)</label><input id="t_a" inputmode="numeric" value="${t.amount?t.amount.toLocaleString('id-ID'):''}" oninput="fmtIn(this);chk()"></div></div>
   <label style="margin-top:16px">Diambil dari saldo pos</label>
-  ${S.pos.map(p=>`<div class="al"><span>${esc(p.name)}<small>Tersedia ${rp(EB[p.id])}</small></span><input class="ai" data-p="${p.id}" inputmode="numeric" placeholder="0" value="${t.alloc[p.id]?t.alloc[p.id].toLocaleString('id-ID'):''}" oninput="fmtIn(this);chk()"></div>`).join('')}
+  ${S.pos.map(p=>`<div class="al"><span>${esc(p.name)}<small>Tersedia${rp(EB[p.id])}</small></span><input class="ai" data-p="${p.id}" inputmode="numeric" placeholder="0" value="${t.alloc[p.id]?t.alloc[p.id].toLocaleString('id-ID'):''}" oninput="fmtIn(this);chk()"></div>`).join('')}
   <div class="chk" id="chk"></div>
   <div class="row sp"><button class="btn s" onclick="autoFill()">Isi otomatis dari saldo</button><div class="row"><button class="btn" onclick="close_()">Batal</button><button class="btn p" onclick="saveTx('${id||''}')">Simpan</button></div></div>`);dayLbl();chk();
 }
@@ -251,8 +293,13 @@ function delPos(id){const used=S.topups.some(t=>t.pos===id)||S.tx.some(t=>id in 
   if(!confirm(used?'Pos ini punya riwayat top-up/transaksi. Hapus tetap? Riwayatnya tetap ada namun tidak dihitung ke saldo.':'Hapus pos ini?'))return;
   S.pos=S.pos.filter(p=>p.id!==id);save();render()}
 
-S=load();
-lockUI(getPin()?'login':'setup');
+// Inisialisasi awal aplikasi
+async function initApp() {
+  await loadData();
+  lockUI(getPin()?'login':'setup');
+}
+
+initApp();
 </script>
 </body>
 </html>
