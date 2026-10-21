@@ -81,7 +81,7 @@ td{padding:11px 8px;border-bottom:1px solid var(--line);vertical-align:top}tr:la
 const DAYS=['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'],MON=['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
 const KEY='catatan-keuangan-v1',PK='catatan-keuangan-pin';
 /* ====== KONEKSI GOOGLE SHEETS (Apps Script) ====== */
-const APPS_SCRIPT_URL='';   // ← TEMPEL URL Web App Apps Script di sini (berakhiran /exec)
+const APPS_SCRIPT_URL='https://script.google.com/macros/s/AKfycbzACP_505CXjmD8Z1LrvDmDWnAfL0DOgRMgGXWIbSkQZFzrZhGbJ139Q6vllUrF8bho/exec';   // ← TEMPEL URL Web App Apps Script di sini (berakhiran /exec)
 const API_TOKEN='';         // ← opsional; harus sama dengan SECRET di Code.gs
 const CK='catatan-keuangan-api';
 const ls={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},del:k=>{try{localStorage.removeItem(k)}catch(e){}}};
