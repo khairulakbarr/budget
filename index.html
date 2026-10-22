@@ -70,7 +70,7 @@ td{padding:11px 8px;border-bottom:1px solid var(--line);vertical-align:top}tr:la
 <body>
 <div id="lock"></div>
 <header><div class="hin">
-  <div class="brand"><div class="logo">K</div><div><b>Bookkeeping</b><small>Income &amp; Expenses</small></div></div>
+  <div class="brand"><div class="logo">K</div><div><b>Catatan Keuangan</b><small>Pengeluaran harian &amp; saldo per pos</small></div></div>
   <nav id="nav"></nav>
   <div class="hb"><button onclick="syncForm()">⇅ Sinkron <span id="sdot" style="color:#8f9ab6">●</span></button><button onclick="pinChange()">Ganti PIN</button><button onclick="lockNow()">🔒 Kunci</button></div>
 </div></header>
@@ -86,18 +86,34 @@ const API_TOKEN='';         // ← opsional; harus sama dengan SECRET di Code.gs
 const CK='catatan-keuangan-api';
 const ls={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},del:k=>{try{localStorage.removeItem(k)}catch(e){}}};
 function cfg(){let o={};try{o=JSON.parse(ls.get(CK)||'{}')}catch(e){}return{url:(o.url||APPS_SCRIPT_URL||'').trim(),token:o.token||API_TOKEN||''}}
-let Q=Promise.resolve();
+const OB='ck-outbox';
+const obGet=()=>{try{return JSON.parse(ls.get(OB)||'[]')}catch(e){return[]}},obSet=a=>ls.set(OB,JSON.stringify(a));
+let busy=false,lastSig='',poll=null;
+const hm=()=>new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 function setST(s,m){const d=document.getElementById('sdot');if(d){d.style.color={off:'#8f9ab6',ok:'#3fd0a0',busy:'#d9b25c',err:'#ff7b6b'}[s];d.title=m||s}const e=document.getElementById('s_st');if(e)e.textContent=m||s}
 async function call(body){const c=cfg();if(!c.url)throw new Error('URL Apps Script belum diisi');
   const r=await fetch(c.url,{method:'POST',body:JSON.stringify(Object.assign({token:c.token},body))});
-  const j=await r.json();if(!j.ok)throw new Error(j.error||'Gagal');return j.data}
-function api(body){if(!cfg().url)return;setST('busy','Menyinkron…');
-  Q=Q.then(()=>call(body)).then(()=>{ls.del('ck-dirty');setST('ok','Tersinkron')}).catch(e=>{ls.set('ck-dirty','1');setST('err','Gagal sinkron: '+e.message)});return Q}
+  const j=await r.json();if(!j.ok){const e=new Error(j.error||'Gagal');e.server=true;throw e}return j.data}
+/* Antrian (outbox) tersimpan di perangkat: perubahan tidak hilang walau halaman di-refresh sebelum terkirim */
+function api(body){if(!cfg().url)return;const a=obGet();a.push(body);obSet(a);flush()}
+async function flush(){if(busy||!cfg().url)return;busy=true;
+  try{let a;while((a=obGet()).length){setST('busy','Menyimpan ke Sheet ('+a.length+')…');
+      try{await call(a[0])}catch(e){if(!e.server)throw e;alert('Sheet menolak perubahan: '+e.message)}
+      const b=obGet();b.shift();obSet(b)}
+    setST('ok','Tersinkron '+hm());busy=false;return true}
+  catch(e){busy=false;setST('err','Gagal terhubung ('+e.message+'). Dicoba ulang otomatis…');setTimeout(flush,8000);return false}}
 async function pull(silent){if(!cfg().url){setST('off','Belum terhubung ke Sheet');return}
-  if(silent&&ls.get('ck-dirty')){setST('err','Ada perubahan lokal belum terkirim. Buka ⇅ Sinkron → Kirim semua ke Sheet.');return}
-  setST('busy','Mengambil data dari Sheet…');
-  try{const d=await call({action:'all'});S={pos:d.pos,topups:d.topups,cats:d.cats,tx:d.tx};save();ls.del('ck-dirty');setST('ok','Tersinkron dengan Sheet');render()}
+  if(busy)return;if(obGet().length){await flush();if(obGet().length)return}
+  try{const d=await call({action:'all'});if(obGet().length||busy)return;   // ada input baru saat mengambil → jangan timpa
+    const n={pos:d.pos,topups:d.topups,cats:d.cats,tx:d.tx},sig=JSON.stringify(n);
+    if(sig!==lastSig){lastSig=sig;S=n;save();render()}
+    setST('ok','Tersinkron '+hm())}
   catch(e){setST('err','Gagal: '+e.message);if(!silent)alert('Gagal menarik data: '+e.message)}}
+const unlocked=()=>document.getElementById('lock').style.display==='none';
+function startPoll(){clearInterval(poll);poll=setInterval(()=>{if(!document.hidden&&unlocked())pull(true)},12000)}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&unlocked())pull(true)});
+window.addEventListener('focus',()=>{if(unlocked())pull(true)});
+window.addEventListener('online',()=>{flush().then(()=>pull(true))});
 function syncForm(){const c=cfg();open_(`<h3>Sinkron Google Sheets</h3><div class="f"><div class="w"><label>URL Web App Apps Script</label><input id="s_u" value="${esc(c.url)}" placeholder="https://script.google.com/macros/s/…/exec"></div>
   <div class="w"><label>Token (opsional)</label><input id="s_t" value="${esc(c.token)}" placeholder="sama dengan SECRET di Code.gs"></div></div>
   <div class="mut" style="margin:12px 0">Status: <b id="s_st">${c.url?'siap':'belum terhubung'}</b></div>
@@ -106,9 +122,9 @@ function syncForm(){const c=cfg();open_(`<h3>Sinkron Google Sheets</h3><div clas
   <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="btn" onclick="close_()">Tutup</button></div>`)}
 async function syncSave(){ls.set(CK,JSON.stringify({url:document.getElementById('s_u').value.trim(),token:document.getElementById('s_t').value.trim()}));
   try{setST('busy','Menguji…');const d=await call({action:'ping'});setST('ok','Terhubung ke: '+d.spreadsheet)}catch(e){setST('err','Gagal: '+e.message)}}
-async function syncPull(){await syncSave();if(!confirm('Data di webapp akan DIGANTI dengan isi Sheet. Lanjutkan?'))return;await pull(false);close_()}
+async function syncPull(){await syncSave();if(!confirm('Data di webapp akan DIGANTI dengan isi Sheet. Lanjutkan?'))return;obSet([]);lastSig='';await pull(false);close_()}
 async function syncPush(){await syncSave();if(!confirm('Isi Sheet (kolom input) akan DIGANTI dengan data di webapp. Lanjutkan?'))return;
-  try{setST('busy','Mengirim…');const d=await call({action:'bulk',data:S});ls.del('ck-dirty');setST('ok','Terkirim: '+d.tx+' transaksi, '+d.topups+' top-up, '+d.pos+' pos, '+d.cats+' kategori')}catch(e){setST('err','Gagal: '+e.message)}}
+  try{setST('busy','Mengirim…');obSet([]);const d=await call({action:'bulk',data:S});lastSig='';setST('ok','Terkirim: '+d.tx+' transaksi, '+d.topups+' top-up, '+d.pos+' pos, '+d.cats+' kategori')}catch(e){setST('err','Gagal: '+e.message)}}
 
 const uid=()=>Math.random().toString(36).slice(2,10);
 let S,view='saldo',F={m:'',c:''},OPEN={};
@@ -148,7 +164,7 @@ function lockUI(mode,tmp){
     if(await hash(v)===getPin())unlock();else{e.textContent='PIN salah.';i.value=''}};
   document.getElementById('go').onclick=go;i.onkeydown=ev=>{if(ev.key==='Enter')go()};
 }
-function unlock(){document.getElementById('lock').style.display='none';render();pull(true)}
+function unlock(){document.getElementById('lock').style.display='none';render();flush().then(()=>pull(true));startPoll()}
 function lockNow(){close_();document.getElementById('app').innerHTML='';lockUI(getPin()?'login':'setup')}
 function pinReset(){if(confirm('Reset akan MENGHAPUS semua data dan PIN. Lanjutkan?')&&confirm('Yakin? Tindakan ini tidak bisa dibatalkan.')){try{localStorage.removeItem(KEY);localStorage.removeItem(PK)}catch(e){}S=seed();lockUI('setup')}}
 function pinChange(){open_(`<h3>Ganti PIN</h3><div class="f"><div class="w"><label>PIN lama</label><input id="o_p" type="password" inputmode="numeric" maxlength="6"></div><div><label>PIN baru</label><input id="n_p" type="password" inputmode="numeric" maxlength="6"></div><div><label>Ulangi PIN baru</label><input id="n_q" type="password" inputmode="numeric" maxlength="6"></div></div><div class="err" id="pe" style="margin-top:10px"></div>
